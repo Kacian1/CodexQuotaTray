@@ -1,20 +1,25 @@
-# v2.6.3 · 社区 fork 版本说明
+# CodexQuotaTray v2.6.3 · 个人修改版
 
-本 fork 由 **dachengzi6661** 维护，当前版本为 **v2.6.3**（2026-10-16）。
+本仓库由 **Kacian1** 维护，基于 [dachengzi6661/CodexQuotaTray](https://github.com/dachengzi6661/CodexQuotaTray) 的 v2.6.3 社区版本，上游为 [SYD-Official/CodexQuotaTray](https://github.com/SYD-Official/CodexQuotaTray)。
 
-**[查看 Release 与全部附件](https://github.com/dachengzi6661/CodexQuotaTray/releases/tag/v2.6.3)** · **[下载 Windows ZIP](https://github.com/dachengzi6661/CodexQuotaTray/releases/download/v2.6.3/CodexQuotaTray-v2.6.3-Windows.zip)** · **[下载单文件 EXE](https://github.com/dachengzi6661/CodexQuotaTray/releases/download/v2.6.3/CodexQuotaTray-v2.6.3.exe)**
+这是一个只读的 Windows Codex 额度显示工具，用于展示本机 Codex 的额度、重置时间和本地 token 活动。它不是 OpenAI 官方项目。
 
-## 本次更新
+## 本仓库改动
 
-- **修复 Chrome 视频全屏漏判**：兼容网页视频全屏仍保留最大化标志的情况，通过窗口事件及时隐藏和恢复数字条，保留定时兜底。
-- **自动跟随任务栏**：窗口与任务栏变化后合并刷新，用同一个 EXE 的短时后台探针读取新坐标，并独立保留 20 秒兜底刷新。
-- **拖动与位置记忆**：在任务栏内拖动数字条，松开保存相对位置；普通单击仍打开详情。托盘菜单“重置悬浮窗位置”恢复自动定位。
+- **修复任务栏数字条不显示**：原实现把 `GWLP_HWNDPARENT` 指向另一进程的 `Shell_TrayWnd`，失败后阻断了定位和显示。现在 owner 仅作 best-effort，并显式声明 `WS_EX_TOPMOST`、提前创建句柄、按“先定位再显示再置顶”的顺序恢复。
+- **全屏显示**：新增 `HideOnFullscreen` 设置，默认 `false`，数字条在全屏应用上方也保持可见；可在托盘右键菜单勾选“全屏时隐藏数字条”。
+- **避让托盘展开箭头**：自动定位以通知区域左边界为基准，预留至少 270 逻辑像素的安全区；实际托盘更宽时自动采用实际宽度，图标越多数字条越往左让位。
+- **交互保持原版**：左键数字条打开额度详情，右键打开菜单；托盘图标行为不变。
 
-## 2026-10-18 修复
+## 构建
 
-- **任务栏数字条不显示**：Windows 不允许把 `GWLP_HWNDPARENT` 指向另一进程的 `Shell_TrayWnd`，原实现却把 owner 贴附成功当作定位/显示的前置条件，导致数字条停在 `(0,0)` 或被任务栏盖住。现在 owner 仅作 best-effort，显示与定位不再依赖它；同时在 `CreateParams` 中显式声明 `WS_EX_TOPMOST`，启动时提前创建句柄，并按“先定位、再显示、再置顶”的顺序恢复。
-- **全屏显示**：新增 `HideOnFullscreen` 设置，默认 `false`，数字条在全屏应用/游戏上方也保持可见；可在托盘右键菜单勾选“全屏时隐藏数字条”恢复旧的自动隐藏行为。
-- **避让托盘展开箭头**：自动定位以通知区域左边界为基准，并预留至少 270 逻辑像素的托盘安全区；实际托盘更宽时自动采用实际宽度，所以图标越多数字条越往左让位。手动拖动或保存的位置也会被限制在该边界左侧，不再覆盖“显示隐藏的图标”箭头。
+本仓库不提交 `dist/`、`build/` 等构建产物。在 PowerShell 中运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+生成 `dist\CodexQuotaTray-v2.6.3.exe`，并同时生成配套的 TXT 使用说明。项目使用 Windows 自带的 .NET Framework 4.8 编译器，不需要安装 Visual Studio 或 .NET SDK。
 
 ## 已有功能
 
@@ -24,17 +29,11 @@
 
 ## 下载与使用
 
-先安装、登录并启动 Codex 桌面应用，再解压 ZIP 并运行 `CodexQuotaTray-v2.6.3.exe`，或直接下载同名单文件 EXE。ZIP 内附完整 TXT 使用说明。
+本仓库以源码为主，不附带预编译 EXE。先安装、登录并启动 Codex 桌面应用，再运行 `build.ps1` 生成的 `dist\CodexQuotaTray-v2.6.3.exe`。
 
-程序内“检查更新”仍指向上游仓库；使用本 fork 的版本请从上方 Release 链接手动下载。AIHOT 重置信息来自第三方公开服务，程序会定期联网获取。
+程序内“检查更新”仍指向上游仓库，本仓库不提供自动更新。AIHOT 重置信息来自第三方公开服务，程序会定期联网获取。
 
-EXE SHA-256：
-
-```text
-8710E18B49E412AC2AF3713AA709FDF7D7BD510BA7D99B8323ADFE36449D2F9B
-```
-
-对应源码已通过构建、解析与位置测试，以及跟随、拖动和全屏集成检查；多显示器实际运行尚未验收。源码持续提交至[上游 PR #3](https://github.com/SYD-Official/CodexQuotaTray/pull/3)。
+本仓库源码已通过 `build.ps1` 构建、`ParserTests.exe` 解析与位置测试；多显示器实际运行尚未验收。
 
 ---
 
@@ -120,11 +119,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
 生成文件使用版本化名称，例如 `dist\CodexQuotaTray-v2.6.3.exe`，并同时生成配套的完整 TXT 使用说明；构建新版不会覆盖旧版文件。项目使用 Windows 自带的 .NET Framework 4.8 编译器，不需要安装 Visual Studio 或 .NET SDK。
 
-作者：渡缘笙SYD · [Bilibili](https://space.bilibili.com/1266346466) · [GitHub](https://github.com/SYD-Official/CodexQuotaTray)
+上游作者：渡缘笙SYD · [Bilibili](https://space.bilibili.com/1266346466) · [GitHub](https://github.com/SYD-Official/CodexQuotaTray)
+
+本仓库维护：Kacian1 · [GitHub](https://github.com/Kacian1/CodexQuotaTray)
 
 这是非官方社区工具，与 OpenAI 无隶属或背书关系。
 
-官方发布地址：https://github.com/SYD-Official/CodexQuotaTray/releases
+上游发布地址：https://github.com/SYD-Official/CodexQuotaTray/releases
 
 ## 许可证
 
