@@ -315,10 +315,12 @@ Get-FileHash .\{{FILE_NAME}} -Algorithm SHA256
 
 软件名称：CodexQuotaTray
 版本：v{{VERSION}}
-作者昵称：渡缘笙SYD
+上游作者昵称：渡缘笙SYD
 Bilibili：https://space.bilibili.com/1266346466
-GitHub：https://github.com/SYD-Official/CodexQuotaTray
-官方发布地址：https://github.com/SYD-Official/CodexQuotaTray/releases
+上游 GitHub：https://github.com/SYD-Official/CodexQuotaTray
+上游发布地址：https://github.com/SYD-Official/CodexQuotaTray/releases
+本仓库维护：Kacian1
+本仓库地址：https://github.com/Kacian1/CodexQuotaTray
 
 Copyright © 2026 SYD-Official.
 本项目基于 MIT License 开源。衍生版本请勿冒充本项目官方发布。
