@@ -27,7 +27,6 @@ internal static class PreviewHarness
                 var light = mode.IndexOf("light", StringComparison.Ordinal) >= 0;
                 var settings = mode.IndexOf("settings", StringComparison.Ordinal) >= 0;
                 var moreSettings = mode.IndexOf("more", StringComparison.Ordinal) >= 0;
-                var aihot = mode.IndexOf("aihot", StringComparison.Ordinal) >= 0;
                 var equalQuotaLayout = mode.IndexOf("equal", StringComparison.Ordinal) >= 0;
                 var glassEnabled = mode.IndexOf("off", StringComparison.Ordinal) < 0;
                 var useTestBackdrop = mode.IndexOf("backdrop", StringComparison.Ordinal) >= 0;
@@ -44,9 +43,7 @@ internal static class PreviewHarness
                     ActivityRange = mode.IndexOf("5h", StringComparison.OrdinalIgnoreCase) >= 0 ? ActivityRange.Hours5 : ActivityRange.Days30
                 });
                 interactive.ApplyResult(new SessionQuotaReader().ReadLatest());
-                interactive.AttachAihotService(new AihotService());
-                if (aihot) interactive.ShowPreviewPage(3);
-                else if (moreSettings) interactive.ShowPreviewPage(2);
+                if (moreSettings) interactive.ShowPreviewPage(2);
                 else if (settings) interactive.ShowPreviewPage(1);
                 if (mode.IndexOf("entryhover", StringComparison.Ordinal) >= 0)
                     interactive.SetPreviewHint(36);
@@ -78,9 +75,7 @@ internal static class PreviewHarness
                     using (var graphics = Graphics.FromImage(bitmap))
                     {
                         graphics.CopyFromScreen(interactive.Left, interactive.Top, 0, 0, interactive.Size);
-                        var fileName = aihot
-                            ? (light ? "AihotResetsLightPreview.png" : "AihotResetsDarkPreview.png")
-                            : (moreSettings
+                        var fileName = moreSettings
                             ? (light ? "AcrylicMoreLightPreview.png" : "AcrylicMoreDarkPreview.png")
                             : (settings
                             ? (glassEnabled
@@ -88,7 +83,7 @@ internal static class PreviewHarness
                                 : (light ? "AcrylicSettingsLightOffPreview.png" : "AcrylicSettingsDarkOffPreview.png"))
                             : (useTestBackdrop
                                 ? (light ? "AcrylicBackdropLightPreview.png" : "AcrylicBackdropDarkPreview.png")
-                                : (light ? "AcrylicLightPreview.png" : "AcrylicLivePreview.png"))));
+                                : (light ? "AcrylicLightPreview.png" : "AcrylicLivePreview.png")));
                         bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName), ImageFormat.Png);
                     }
                     interactive.Close();
@@ -107,7 +102,6 @@ internal static class PreviewHarness
         {
             var result = new SessionQuotaReader().ReadLatest();
             form.ApplyResult(result);
-            form.AttachAihotService(new AihotService());
             form.Show();
             Application.DoEvents();
             using (var bitmap = new Bitmap(form.Width, form.Height))

@@ -11,7 +11,7 @@ namespace CodexQuotaTray
         private static void Main(string[] args)
         {
             // The probe must exit before single-instance checks and before any quota,
-            // settings, AIHOT or tray initialization.
+            // settings or tray initialization.
             if (args != null && args.Length == 1 && args[0] == "--anchor-probe")
             {
                 TaskbarWidgetForm.WriteAnchorProbeResult();

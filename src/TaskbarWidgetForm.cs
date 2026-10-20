@@ -66,7 +66,6 @@ namespace CodexQuotaTray
         private bool _hasWeeklyWindow;
         private bool _active;
         private bool _overlaySuppressed;
-        private bool _blinkHighlight;
         private float _dpiScale = 1f;
         private AppSettings _settings = new AppSettings();
         private ThemePalette _palette;
@@ -189,15 +188,6 @@ namespace CodexQuotaTray
                 try { if (Visible) Hide(); }
                 catch { }
             }
-        }
-
-        /// <summary>AIHOT 鏂伴€氱煡闂儊楂樹寒(鍙敼搴曡壊,涓嶆敼鏁板瓧鍐呭)銆?/summary>
-        public void SetBlinkHighlight(bool highlighted)
-        {
-            if (_blinkHighlight == highlighted) return;
-            _blinkHighlight = highlighted;
-            try { Invalidate(); }
-            catch { }
         }
 
         public void EnsureOnTop()
@@ -759,8 +749,6 @@ namespace CodexQuotaTray
             var weeklyAccent = _active ? _palette.QuotaColor(_weeklyRemainingPercent) : _palette.Faint;
             var baseWidth = GetBaseWidth();
             var backgroundColor = TaskbarBackground;
-            if (_blinkHighlight)
-                backgroundColor = Blend(backgroundColor, _palette.Primary, _palette.IsLight ? 0.14f : 0.20f);
             using (var background = new SolidBrush(backgroundColor))
             {
                 graphics.FillRectangle(background, 0, 0, baseWidth, BaseHeight);
