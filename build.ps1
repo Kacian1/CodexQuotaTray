@@ -34,6 +34,7 @@ $sources = Get-ChildItem (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach
 if ($LASTEXITCODE -ne 0) { throw 'Main application compilation failed.' }
 
 $testSources = @(
+    "$projectRoot\src\Diagnostics.cs",
     "$projectRoot\src\Models.cs",
     "$projectRoot\src\AppSettings.cs",
     "$projectRoot\src\CodexCompletionMonitor.cs",
@@ -52,6 +53,7 @@ $testSources = @(
 if ($LASTEXITCODE -ne 0) { throw 'Test program compilation failed.' }
 
 $previewSources = @(
+    "$projectRoot\src\Diagnostics.cs",
     "$projectRoot\src\AcrylicEffect.cs",
     "$projectRoot\src\LayeredTextOverlay.cs",
     "$projectRoot\src\AppSettings.cs",
@@ -75,6 +77,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Preview harness compilation failed.' }
 
 $readmeTemplate = Get-Content (Join-Path $projectRoot 'README-delivery-template.txt') -Raw -Encoding UTF8
 $outputPath = Join-Path $distributionDirectory $outputName
+
+# Sign with the local dev certificate (see README) so SmartScreen stops treating every
+# rebuild as an unknown publisher. Must run before the SHA-256 is written into the README.
+$signingSubject = 'CN=CodexQuotaTray Local Dev'
+$signingCert = Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -eq $signingSubject -and $_.HasPrivateKey } |
+    Sort-Object NotAfter -Descending |
+    Select-Object -First 1
+if ($signingCert) {
+    $signature = Set-AuthenticodeSignature -FilePath $outputPath -Certificate $signingCert -HashAlgorithm SHA256
+    Write-Host "Signed: $($signingCert.Thumbprint) status=$($signature.Status)"
+} else {
+    Write-Host 'Signing certificate not found; binary left unsigned.'
+}
+
 $readmeContent = $readmeTemplate `
     -replace '\{\{VERSION\}\}', $appVersion `
     -replace '\{\{FILE_NAME\}\}', $outputName `

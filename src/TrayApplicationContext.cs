@@ -10,8 +10,11 @@ namespace CodexQuotaTray
     internal sealed class TrayApplicationContext : ApplicationContext
     {
         private const int RefreshIntervalMilliseconds = 20000;
+        // A single read should never take this long. When it does, the gate is treated as
+        // wedged: reset it and rebuild the reader so the 20s heartbeat can recover.
+        private const int RefreshStuckMilliseconds = 30000;
         private const int CompletionFlashIntervalMilliseconds = 600;
-        private readonly SessionQuotaReader _reader;
+        private SessionQuotaReader _reader;
         private readonly CodexCompletionMonitor _completionMonitor;
         private readonly AihotService _aihotService;
         private AihotResetsForm _aihotForm;
@@ -47,6 +50,8 @@ namespace CodexQuotaTray
         private bool _overlaySuppressedByFullscreen;
         private int _completionUnreadCount;
         private int _refreshBusy;
+        private int _refreshQueued;
+        private long _refreshStartedUtcTicks;
 
         public TrayApplicationContext()
         {
@@ -61,7 +66,7 @@ namespace CodexQuotaTray
             _popup = new QuotaPopupForm();
             _popup.AttachAihotService(_aihotService);
             _popup.ApplySettings(_settings);
-            _popup.RefreshRequested += delegate { RefreshInBackground(); };
+            _popup.RefreshRequested += delegate { RefreshInBackground(true); };
             _popup.ExitRequested += delegate { ExitThread(); };
             _popup.SettingsChanged += delegate { ApplySettingsChange(); };
             _popup.UpdateCheckRequested += delegate { CheckForUpdates(); };
@@ -83,7 +88,7 @@ namespace CodexQuotaTray
             _showMenuItem = new ToolStripMenuItem();
             _showMenuItem.Click += delegate { TogglePopup(_lastTrayAnchor); };
             _refreshMenuItem = new ToolStripMenuItem();
-            _refreshMenuItem.Click += delegate { RefreshInBackground(); };
+            _refreshMenuItem.Click += delegate { RefreshInBackground(true); };
             _aihotMenuItem = new ToolStripMenuItem();
             _aihotMenuItem.Click += delegate { ShowAihotWindow(); };
             _aihotBlinkMenuItem = new ToolStripMenuItem();
@@ -290,7 +295,7 @@ namespace CodexQuotaTray
             else
             {
                 _popup.ShowCenteredAbove(anchorBounds);
-                RefreshInBackground();
+                RefreshInBackground(true);
             }
         }
 
@@ -315,15 +320,66 @@ namespace CodexQuotaTray
 
         private void RefreshNow()
         {
-            ApplyReadResult(_reader.ReadLatest());
+            var started = DateTime.UtcNow;
+            try
+            {
+                var result = _reader.ReadLatest();
+                Diagnostics.Write("refresh(ui-sync) " + ElapsedMs(started) + "ms " + DescribeResult(result));
+                ApplyReadResult(result);
+            }
+            catch (Exception error)
+            {
+                Diagnostics.Write("refresh(ui-sync) threw after " + ElapsedMs(started) + "ms " + Diagnostics.Describe(error));
+            }
         }
 
         private void RefreshInBackground()
         {
-            if (System.Threading.Interlocked.CompareExchange(ref _refreshBusy, 1, 0) != 0) return;
+            RefreshInBackground(false);
+        }
+
+        private void RefreshInBackground(bool userInitiated)
+        {
+            var now = DateTime.UtcNow;
+            if (System.Threading.Interlocked.CompareExchange(ref _refreshBusy, 1, 0) != 0)
+            {
+                var runningTicks = System.Threading.Interlocked.Read(ref _refreshStartedUtcTicks);
+                var ageMilliseconds = runningTicks <= 0 ? 0 : (long)(now - new DateTime(runningTicks, DateTimeKind.Utc)).TotalMilliseconds;
+                if (ageMilliseconds > RefreshStuckMilliseconds)
+                {
+                    Diagnostics.Write("refresh watchdog: previous read stuck " + ageMilliseconds +
+                        "ms, resetting gate and recreating reader");
+                    System.Threading.Interlocked.Exchange(ref _refreshBusy, 0);
+                    _reader = new SessionQuotaReader();
+                    if (System.Threading.Interlocked.CompareExchange(ref _refreshBusy, 1, 0) != 0) return;
+                }
+                else
+                {
+                    if (userInitiated)
+                    {
+                        System.Threading.Interlocked.Exchange(ref _refreshQueued, 1);
+                        Diagnostics.Write("refresh skipped (busy " + ageMilliseconds + "ms), queued the user request");
+                    }
+                    return;
+                }
+            }
+
+            System.Threading.Interlocked.Exchange(ref _refreshStartedUtcTicks, now.Ticks);
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                var result = _reader.ReadLatest();
+                QuotaReadResult result = null;
+                var started = DateTime.UtcNow;
+                try
+                {
+                    result = _reader.ReadLatest();
+                    Diagnostics.Write("refresh(worker" + (userInitiated ? "/user" : "") + ") " +
+                        ElapsedMs(started) + "ms " + DescribeResult(result));
+                }
+                catch (Exception error)
+                {
+                    Diagnostics.Write("refresh(worker) threw after " + ElapsedMs(started) + "ms " + Diagnostics.Describe(error));
+                }
+
                 try
                 {
                     if (_widget.IsDisposed || !_widget.IsHandleCreated)
@@ -334,14 +390,37 @@ namespace CodexQuotaTray
                     _widget.BeginInvoke(new Action(delegate
                     {
                         System.Threading.Interlocked.Exchange(ref _refreshBusy, 0);
-                        ApplyReadResult(result);
+                        if (result != null) ApplyReadResult(result);
+                        if (System.Threading.Interlocked.Exchange(ref _refreshQueued, 0) != 0) RefreshInBackground();
                     }));
                 }
-                catch
+                catch (Exception error)
                 {
+                    Diagnostics.Write("refresh dispatch failed " + Diagnostics.Describe(error));
                     System.Threading.Interlocked.Exchange(ref _refreshBusy, 0);
                 }
             });
+        }
+
+        private static long ElapsedMs(DateTime started)
+        {
+            return (long)(DateTime.UtcNow - started).TotalMilliseconds;
+        }
+
+        private static string DescribeResult(QuotaReadResult result)
+        {
+            if (result == null) return "result=null";
+            var snapshot = result.Snapshot;
+            if (snapshot == null)
+                return "running=" + result.IsCodexRunning + " snapshot=null error=" + (result.Error ?? "-");
+            var age = (long)(DateTimeOffset.Now - snapshot.CapturedAt).TotalSeconds;
+            // A positive age beyond the 20s heartbeat plus timeout margin means the snapshot
+            // came from the local session files instead of the live app-server read.
+            return "running=" + result.IsCodexRunning +
+                " capturedAt=" + snapshot.CapturedAt.ToLocalTime().ToString("HH:mm:ss") +
+                " age=" + age + "s windows=" + snapshot.Windows.Count +
+                (age > 90 ? " (FALLBACK)" : "") +
+                " error=" + (result.Error ?? "-");
         }
 
         private void ApplyReadResult(QuotaReadResult result)
@@ -374,10 +453,14 @@ namespace CodexQuotaTray
             {
                 var fiveHour = result.Snapshot.FiveHourWindow;
                 var weekly = result.Snapshot.DisplayWeeklyWindow;
+                var ageSeconds = (long)(DateTimeOffset.Now - result.Snapshot.CapturedAt).TotalSeconds;
                 var tooltip = (fiveHour == null ? "5H --" : "5H " + fiveHour.RemainingPercent + "%") +
                     (weekly == null || weekly == fiveHour ? "" :
                         (result.Snapshot.IsReserveActive ? " · Reserve " : " · 7D ") + weekly.RemainingPercent + "%");
                 if (_hasCompletionUnread) tooltip += T(" · 新任务 ", " · New ") + _completionUnreadCount;
+                // A low-integrity process cannot launch app-server, so the numbers above are
+                // stale session data. Say so instead of pretending they are live.
+                if (Diagnostics.IsLowIntegrity && ageSeconds > 90) tooltip += T(" · 沙箱受限，数据非实时", " · sandboxed, not live");
                 SetTooltip(tooltip);
             }
         }

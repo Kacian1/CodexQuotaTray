@@ -10,6 +10,30 @@
 - **全屏显示**：新增 `HideOnFullscreen` 设置，默认 `false`，数字条在全屏应用上方也保持可见；可在托盘右键菜单勾选“全屏时隐藏数字条”。
 - **避让托盘展开箭头**：自动定位以通知区域左边界为基准，预留至少 270 逻辑像素的安全区；实际托盘更宽时自动采用实际宽度，图标越多数字条越往左让位。
 - **交互保持原版**：左键数字条打开额度详情，右键打开菜单；托盘图标行为不变。
+- **修复实时额度长期不更新**：`ReadAppServerResponse` 不再以 `process.HasExited` 作为循环条件 —— codex 写完响应就退出时，管道里已缓冲的响应会被整段丢弃，导致每次都判定失败并回退本地旧快照。现在读到 EOF 或超时才结束。
+- **放宽额度请求超时**：`initialize` 2.5s → 4s，`account/rateLimits/read` 4s → 8s。实测该请求抖动区间 1.1–4.1s，原 4s 门槛正好卡在上沿，偶发超时就会静默回退旧数据。
+- **卡死自愈**：后台刷新互斥锁超过 30 秒未释放时自动复位并重建 reader；手动点击刷新改为排队补一次，不再静默丢弃。
+- **运行诊断日志**：新增 `diagnostic.log`，记录每次读取的耗时、数据来源（实时/本地兜底）、app-server 的 stderr 与进程完整性级别。
+- **沙箱自检**：启动时读取令牌完整性级别（`TokenIntegrityLevel`）。低完整性进程无法写入 `%USERPROFILE%\.codex\tmp`，codex app-server 会因创建 PATH alias 失败而在 ~110ms 内退出，界面只能显示旧的会话快照；此时托盘提示会追加“沙箱受限，数据非实时”。
+
+## 诊断日志
+
+`%LOCALAPPDATA%\CodexMeter\diagnostic.log`（不可写时依次回退到 exe 同级目录、`%TEMP%`），512 KB 轮转。每 20 秒一轮，典型正常输出：
+
+```
+main: integrity medium (0x2000) user=<domain>\<user>
+appserver: initialize+read 1274ms (rateLimits 1128ms) parsed=True total=1280ms
+refresh(worker) 1464ms running=True capturedAt=01:13:53 age=0s windows=2 error=-
+```
+
+需要关注的三行：
+
+| 日志 | 含义 |
+|---|---|
+| `integrity low (0x1000) SANDBOXED` | 进程被沙箱降权，实时额度一定失败 |
+| `appserver: initialize failed ... stderr=Error: 拒绝访问` | app-server 无法写 `.codex\tmp`，通常是完整性级别或 ACL 问题 |
+| `capturedAt=... age=NNNs (FALLBACK)` | 正在使用本地会话快照，界面时间会停住 |
+
 
 ## 构建
 
@@ -20,6 +44,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 生成 `dist\CodexQuotaTray-v2.6.3.exe`，并同时生成配套的 TXT 使用说明。项目使用 Windows 自带的 .NET Framework 4.8 编译器，不需要安装 Visual Studio 或 .NET SDK。
+
+构建结束时会用本机 `CN=CodexQuotaTray Local Dev` 证书对 EXE 签名（步骤排在计算 README 的 SHA-256 之前，避免哈希与产物不一致）；证书不存在时自动跳过，产物保持未签名。自签名只能让系统识别“发布者”，无法通过 SmartScreen 的信誉检查。
 
 ## 已有功能
 

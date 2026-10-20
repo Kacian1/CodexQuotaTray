@@ -13,6 +13,11 @@ namespace CodexQuotaTray
     {
         private const int MaximumFilesToInspect = 24;
         private const int MaximumActivityFiles = 300;
+        // Measured on a warm machine: initialize ~0.4s, rateLimits 1.1–4.1s. The old
+        // 2.5s/4s limits sat inside normal jitter, so a slow reply was misread as
+        // "app-server unavailable" and the UI silently fell back to stale session data.
+        private const int InitializeTimeoutMilliseconds = 4000;
+        private const int RateLimitsTimeoutMilliseconds = 8000;
         private const int TailBytes = 768 * 1024;
         private readonly string _codexHome;
         private readonly Func<bool> _processDetector;
@@ -62,6 +67,7 @@ namespace CodexQuotaTray
                 QuotaSnapshot latest = liveSnapshot;
                 if (latest == null)
                 {
+                    if (result.IsCodexRunning) Diagnostics.Write("quota: live read unavailable, falling back to session files");
                     foreach (var file in files)
                     {
                         var candidate = ReadLatestFromFile(file.FullName);
@@ -349,10 +355,15 @@ namespace CodexQuotaTray
 
         private QuotaSnapshot ReadLatestFromAppServer()
         {
+            var started = DateTime.UtcNow;
             try
             {
                 var executable = ResolveCodexExecutable();
-                if (string.IsNullOrWhiteSpace(executable)) return null;
+                if (string.IsNullOrWhiteSpace(executable))
+                {
+                    Diagnostics.Write("appserver: codex executable not found");
+                    return null;
+                }
 
                 using (var process = new Process())
                 {
@@ -366,18 +377,38 @@ namespace CodexQuotaTray
                         RedirectStandardOutput = true,
                         RedirectStandardError = true
                     };
-                    if (!process.Start()) return null;
+                    var startWatch = DateTime.UtcNow;
+                    Diagnostics.Write("appserver: starting " + executable + " cwd=" + SafeWorkingDirectory());
+                    if (!process.Start())
+                    {
+                        Diagnostics.Write("appserver: Process.Start returned false");
+                        return null;
+                    }
+                    Diagnostics.Write("appserver: spawned in " + ElapsedMs(startWatch) + "ms");
                     try
                     {
-                        process.StandardError.ReadToEndAsync();
+                        var errorTask = process.StandardError.ReadToEndAsync();
                         process.StandardInput.AutoFlush = true;
                         process.StandardInput.WriteLine("{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex-quota-tray\",\"version\":\"2.6.3\"},\"capabilities\":{}}}");
-                        if (ReadAppServerResponse(process, 1, 2500) == null) return null;
+                        if (ReadAppServerResponse(process, 1, InitializeTimeoutMilliseconds) == null)
+                        {
+                            Diagnostics.Write("appserver: initialize failed after " + ElapsedMs(startWatch) + "ms stderr=" +
+                                ReadStderr(errorTask));
+                            return null;
+                        }
 
+                        var readWatch = DateTime.UtcNow;
                         process.StandardInput.WriteLine("{\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{\"excludeResetCreditDetails\":true,\"supportsLunaReserve\":true}}");
-                        var response = ReadAppServerResponse(process, 2, 4000);
+                        var response = ReadAppServerResponse(process, 2, RateLimitsTimeoutMilliseconds);
                         QuotaSnapshot snapshot;
-                        return TryParseAppServerRateLimitsResponse(response, out snapshot) ? snapshot : null;
+                        var parsed = TryParseAppServerRateLimitsResponse(response, out snapshot);
+                        if (!parsed)
+                        {
+                            Diagnostics.Write("appserver: unparsable response " + DescribeResponse(response));
+                        }
+                        Diagnostics.Write("appserver: initialize+read " + ElapsedMs(startWatch) + "ms (rateLimits " +
+                            ElapsedMs(readWatch) + "ms) parsed=" + parsed + " total=" + ElapsedMs(started) + "ms");
+                        return parsed ? snapshot : null;
                     }
                     finally
                     {
@@ -391,24 +422,78 @@ namespace CodexQuotaTray
                     }
                 }
             }
-            catch
+            catch (Exception error)
             {
+                Diagnostics.Write("appserver: threw after " + ElapsedMs(started) + "ms " + Diagnostics.Describe(error));
                 return null;
             }
         }
 
+        private static long ElapsedMs(DateTime started)
+        {
+            return (long)(DateTime.UtcNow - started).TotalMilliseconds;
+        }
+
+        private static string SafeWorkingDirectory()
+        {
+            try { return Directory.GetCurrentDirectory(); }
+            catch { return "?"; }
+        }
+
+        /// <summary>Trims an app-server reply down to something readable in one log line.</summary>
+        private static string DescribeResponse(string response)
+        {
+            if (string.IsNullOrEmpty(response)) return "(null)";
+            var text = response.Replace("\r", " ").Replace("\n", " ").Trim();
+            return text.Length > 400 ? text.Substring(0, 400) : text;
+        }
+
+        /// <summary>Drains captured stderr so a failed spawn explains itself in the log.</summary>
+        private static string ReadStderr(System.Threading.Tasks.Task<string> errorTask)
+        {
+            try
+            {
+                if (errorTask == null) return "(none)";
+                if (!errorTask.Wait(800)) return "(still running)";
+                var text = errorTask.Result;
+                if (string.IsNullOrWhiteSpace(text)) return "(empty)";
+                text = text.Replace("\r", " ").Replace("\n", " / ").Trim();
+                return text.Length > 600 ? text.Substring(0, 600) : text;
+            }
+            catch (Exception error)
+            {
+                return "(read failed " + Diagnostics.Describe(error) + ")";
+            }
+        }
+
+
         private static string ReadAppServerResponse(Process process, long expectedId, int timeoutMilliseconds)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
-            while (!process.HasExited)
+            // Never gate on process.HasExited: app-server writes its reply and exits
+            // immediately, and the buffered reply would be discarded if the loop stopped
+            // as soon as the child died. Read until the pipe reports EOF or the deadline hits.
+            while (true)
             {
                 var remaining = (int)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds);
-                if (remaining <= 1) return null;
+                if (remaining <= 1)
+                {
+                    Diagnostics.Write("appserver: timeout waiting for id " + expectedId);
+                    return null;
+                }
 
                 var read = process.StandardOutput.ReadLineAsync();
-                if (!read.Wait(remaining)) return null;
+                if (!read.Wait(remaining))
+                {
+                    Diagnostics.Write("appserver: timeout waiting for id " + expectedId);
+                    return null;
+                }
                 var line = read.Result;
-                if (line == null) return null;
+                if (line == null)
+                {
+                    Diagnostics.Write("appserver: stdout closed before id " + expectedId);
+                    return null;
+                }
 
                 try
                 {
@@ -421,8 +506,6 @@ namespace CodexQuotaTray
                 {
                 }
             }
-
-            return null;
         }
 
         private static string ResolveCodexExecutable()

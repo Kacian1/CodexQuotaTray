@@ -17,20 +17,42 @@ namespace CodexQuotaTray
                 TaskbarWidgetForm.WriteAnchorProbeResult();
                 return;
             }
-            WaitForPreviousVersion(args);
-            bool createdNew;
-            using (var mutex = new Mutex(true, "CodexQuotaTray.SingleInstance", out createdNew))
+            try
             {
-                if (!createdNew)
+                Diagnostics.Write("main: start args=" + (args == null || args.Length == 0 ? "(none)" : string.Join(" ", args)));
+                Diagnostics.Write("main: env " + Diagnostics.DescribeEnvironment());
+                Diagnostics.Write("main: integrity " + Diagnostics.DescribeIntegrity() +
+                    " user=" + Environment.UserDomainName + "\\" + Environment.UserName);
+                WaitForPreviousVersion(args);
+                bool createdNew;
+                using (var mutex = new Mutex(true, "CodexQuotaTray.SingleInstance", out createdNew))
                 {
-                    MessageBox.Show("Codex 余额已经在运行。", "Codex 余额", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
+                    Diagnostics.Write("main: single-instance createdNew=" + createdNew);
+                    if (!createdNew)
+                    {
+                        MessageBox.Show("Codex 余额已经在运行。", "Codex 余额", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
 
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApplicationContext());
-                GC.KeepAlive(mutex);
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    Application.ThreadException += delegate(object sender, System.Threading.ThreadExceptionEventArgs e)
+                    {
+                        Diagnostics.Write("main: unhandled UI exception " + Diagnostics.Describe(e.Exception));
+                    };
+                    AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs e)
+                    {
+                        Diagnostics.Write("main: unhandled domain exception " + Diagnostics.Describe(e.ExceptionObject as Exception));
+                    };
+                    Application.Run(new TrayApplicationContext());
+                    Diagnostics.Write("main: message loop exited");
+                    GC.KeepAlive(mutex);
+                }
+            }
+            catch (Exception error)
+            {
+                Diagnostics.Write("main: startup failed " + Diagnostics.Describe(error));
+                throw;
             }
         }
 
