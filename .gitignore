@@ -1,7 +1,6 @@
 build/
 dist/
 .vs/
-.workbuddy/
 *.pdb
 *.user
 *.suo

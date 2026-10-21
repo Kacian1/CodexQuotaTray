@@ -28,6 +28,7 @@ namespace CodexQuotaTray
         public double WidgetPositionRatio { get; set; }
         public bool QuotaPrimaryEmphasis { get; set; }
         public bool CompletionReminderEnabled { get; set; }
+        public bool AihotBlinkEnabled { get; set; }
         public bool GlassEnabled { get; set; }
         public int GlassOpacityPercent { get; set; }
         public string ThemeId { get; set; }
@@ -59,6 +60,7 @@ namespace CodexQuotaTray
             WidgetPositionRatio = 0.5;
             QuotaPrimaryEmphasis = true;
             CompletionReminderEnabled = false;
+            AihotBlinkEnabled = false;
             GlassEnabled = true;
             GlassOpacityPercent = 40;
             ThemeId = "cyan";
@@ -101,6 +103,7 @@ namespace CodexQuotaTray
                 if (TryGet(values, "WidgetManualPosition", out widgetVisible)) settings.WidgetManualPosition = widgetVisible;
                 if (TryGet(values, "QuotaPrimaryEmphasis", out widgetVisible)) settings.QuotaPrimaryEmphasis = widgetVisible;
                 if (TryGet(values, "CompletionReminderEnabled", out widgetVisible)) settings.CompletionReminderEnabled = widgetVisible;
+                if (TryGet(values, "AihotBlinkEnabled", out widgetVisible)) settings.AihotBlinkEnabled = widgetVisible;
                 if (TryGet(values, "GlassEnabled", out widgetVisible)) settings.GlassEnabled = widgetVisible;
 
                 string text;
@@ -152,6 +155,7 @@ namespace CodexQuotaTray
                 "WidgetPositionRatio=" + WidgetPlacement.ClampRatio(WidgetPositionRatio).ToString("0.0000", CultureInfo.InvariantCulture),
                 "QuotaPrimaryEmphasis=" + QuotaPrimaryEmphasis,
                 "CompletionReminderEnabled=" + CompletionReminderEnabled,
+                "AihotBlinkEnabled=" + AihotBlinkEnabled,
                 "GlassEnabled=" + GlassEnabled,
                 "GlassOpacityPercent=" + GlassOpacityPercent,
                 "Theme=" + ThemeId,
