@@ -808,7 +808,7 @@ namespace CodexQuotaTray
             }
 
             var value = _active ? _fiveHourRemainingPercent + "%" : "--%";
-            var resetHours = _active ? FormatResetHours(_fiveHourResetsAt, DateTimeOffset.Now) : "--H";
+            var resetClock = _active ? FormatResetClock(_fiveHourResetsAt) : "--";
             var fontScale = _settings.FontScalePercent / 100f;
             using (var valueFont = new Font("Segoe UI", 12.5f * 96f / 72f * fontScale, FontStyle.Bold, GraphicsUnit.Pixel))
             using (var labelFont = new Font("Segoe UI", 6.8f * 96f / 72f * fontScale, FontStyle.Regular, GraphicsUnit.Pixel))
@@ -818,7 +818,7 @@ namespace CodexQuotaTray
             using (var weeklyBrush = new SolidBrush(_active ? weeklyAccent : _palette.Muted))
             {
                 graphics.DrawString(value, valueFont, valueBrush, new RectangleF(42, 2, 52, 25));
-                graphics.DrawString(_active ? resetHours : "OFFLINE", labelFont, labelBrush, new RectangleF(43, 23, 48, 14));
+                graphics.DrawString(_active ? resetClock : "OFFLINE", labelFont, labelBrush, new RectangleF(43, 23, 48, 14));
                 if (_hasWeeklyWindow)
                 {
                     using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
@@ -827,11 +827,11 @@ namespace CodexQuotaTray
             }
         }
 
-        internal static string FormatResetHours(DateTimeOffset? resetsAt, DateTimeOffset now)
+        /// <summary>Wall-clock time the current quota window resets, e.g. "19:31".</summary>
+        internal static string FormatResetClock(DateTimeOffset? resetsAt)
         {
-            if (!resetsAt.HasValue) return "--H";
-            var hours = Math.Max(0d, (resetsAt.Value - now).TotalHours);
-            return hours.ToString("0.#", CultureInfo.InvariantCulture) + "H";
+            if (!resetsAt.HasValue) return "--";
+            return resetsAt.Value.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
         }
 
         private void SetRoundedRegion()
